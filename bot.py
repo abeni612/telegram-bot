@@ -7,16 +7,12 @@ from database import db
 from payment_handler import handle_payment_screenshot, handle_full_name
 from admin import admin_approval_callback, admin_stats, show_pending_approvals, show_banned_users
 from user_management import start_scheduler
-from aiohttp import web
 
 # Setup logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
-
-async def health_check(request):
-    return web.Response(text="Bot is running!")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
