@@ -20,70 +20,36 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Check if user is banned
     db_user = db.get_user(user.id)
     if db_user and db_user.is_banned:
-        await update.message.reply_text(
-            "❌ Your account is currently banned due to expired subscription.\n\n"
-            "To regain access, please:\n"
-            "1. Make a new payment\n"
-            "2. Send screenshot proof\n"
-            "3. Wait for manual approval\n\n"
-            "Each subscription lasts 30 days and requires new approval after expiration."
-        )
+        await update.message.reply_text("❌ Your account is banned. Make a new payment and submit proof.")
         return
     
-    # Check if user exists
     if not db_user:
         db.add_user({
             'user_id': user.id,
             'username': user.username,
             'full_name': user.full_name,
-            'phone_number': '',
             'is_approved': False,
             'is_banned': False
         })
     
-    # Create click-to-copy phone number
     phone_text = f"📞 Phone: `{PHONE_NUMBER}`"
-    
-    # Send welcome message
-    welcome_text = WELCOME_MESSAGE.format(PHONE_NUMBER)
-    
-    # Send message (video can be added later)
-    await update.message.reply_text(welcome_text, parse_mode='Markdown')
+    await update.message.reply_text(WELCOME_MESSAGE.format(PHONE_NUMBER), parse_mode='Markdown')
     await update.message.reply_text(phone_text, parse_mode='Markdown')
     
-    # Instructions for payment
-    instructions = """
-💳 **How to Pay:**
-1. Send payment to the phone number above
-2. Take a clear screenshot of the payment confirmation
-3. Send the screenshot to this bot
-4. Provide your full name when asked
-
-✅ You'll get access within 24 hours after verification
-"""
-    await update.message.reply_text(instructions, parse_mode='Markdown')
+    instructions = "💳 Send payment screenshot to begin approval process."
+    await update.message.reply_text(instructions)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    
     if context.user_data.get('awaiting_name'):
         await handle_full_name(update, context)
     else:
-        # Check if user has active subscription
-        db_user = db.get_user(user.id)
-        if db_user and db_user.is_subscription_active():
-            await update.message.reply_text("I'm here to help! Send /start to see options.")
-        else:
-            await update.message.reply_text("Please complete the payment process to access premium features. Send /start to begin.")
+        await update.message.reply_text("Send /start to begin payment process.")
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logging.error(f"Update {update} caused error {context.error}")
+    logging.error(f"Error: {context.error}")
 
 def main():
-    # Create application
     application = Application.builder().token(BOT_TOKEN).build()
-    
-    # Store admin and channel IDs in bot data
     application.bot_data['admin_id'] = ADMIN_ID
     application.bot_data['channel_id'] = CHANNEL_ID
     
@@ -97,10 +63,8 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_error_handler(error_handler)
     
-    # Start subscription scheduler
     start_scheduler()
-    
-    print("Bot is starting...")
+    print("Bot starting...")
     application.run_polling()
 
 if __name__ == "__main__":
