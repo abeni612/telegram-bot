@@ -104,27 +104,8 @@ def main():
     # Start subscription scheduler
     start_scheduler()
     
-    # For Render: Start web server for health checks
-    if os.getenv('RENDER', None):
-        app = web.Application()
-        app.router.add_get('/health', health_check)
-        
-        # Run both bot and web server
-        import threading
-        
-        def run_web():
-            web.run_app(app, port=8000, host='0.0.0.0')
-        
-        web_thread = threading.Thread(target=run_web)
-        web_thread.daemon = True
-        web_thread.start()
-        
-        print("Bot and web server starting...")
-        application.run_polling()
-    else:
-        # Local development
-        print("Bot is running...")
-        application.run_polling()
+    print("Bot is starting...")
+    application.run_polling()
 
 if __name__ == "__main__":
     main()
