@@ -7,12 +7,21 @@ async def admin_approval_callback(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     await query.answer()
     
+    # Check if user is admin
+    if query.from_user.id != context.bot_data['admin_id']:
+        await query.message.reply_text("❌ Only the admin can approve or reject users.")
+        return
+    
     action, user_id = query.data.split('_')
     user_id = int(user_id)
     target_user = db.get_user(user_id)
     
-    if action == 'approve' and target_user:
-        # Set NEW 30-day subscription (no continuation)
+    if not target_user:
+        await query.edit_message_text("❌ User not found in database.")
+        return
+    
+    if action == 'approve':
+        # Set NEW 30-day subscription
         subscription_end = datetime.now() + timedelta(days=30)
         
         db.update_user(user_id, {
@@ -20,12 +29,6 @@ async def admin_approval_callback(update: Update, context: ContextTypes.DEFAULT_
             'is_banned': False,
             'subscription_end': subscription_end
         })
-        
-        # Update payment history
-        user_payments = db.get_user_payments(user_id)
-        if user_payments:
-            latest_payment = user_payments[-1]
-            # Mark as approved in payment history (you'd need to add this method to database)
         
         # Add user to channel
         try:
@@ -48,11 +51,12 @@ async def admin_approval_callback(update: Update, context: ContextTypes.DEFAULT_
         
         await query.edit_message_text(
             f"✅ User @{target_user.username} approved successfully!\n"
-            f"New subscription until: {subscription_end.strftime('%Y-%m-%d %H:%M')}"
+            f"Subscription until: {subscription_end.strftime('%Y-%m-%d %H:%M')}\n"
+            f"User ID: {user_id}"
         )
         
-    elif action == 'reject' and target_user:
-        # Reject user and keep them banned
+    elif action == 'reject':
+        # Reject user and mark as banned
         db.update_user(user_id, {
             'is_approved': False,
             'is_banned': True
@@ -67,10 +71,14 @@ async def admin_approval_callback(update: Update, context: ContextTypes.DEFAULT_
         except Exception as e:
             print(f"Error notifying user: {e}")
         
-        await query.edit_message_text(f"❌ User @{target_user.username} rejected and banned.")
+        await query.edit_message_text(
+            f"❌ User @{target_user.username} rejected and banned.\n"
+            f"User ID: {user_id}"
+        )
 
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != context.bot_data['admin_id']:
+        await update.message.reply_text("❌ Only the admin can view statistics.")
         return
     
     users = db.get_all_users()
@@ -80,28 +88,31 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     stats_text = f"""
 📊 Bot Statistics:
-Total Users: {len(users)}
-Active Subscriptions: {len(active_users)}
-Pending Approvals: {len(pending_approvals)}
-Banned Users: {len(banned_users)}
+├─ Total Users: {len(users)}
+├─ Active Subscriptions: {len(active_users)}
+├─ Pending Approvals: {len(pending_approvals)}
+└─ Banned Users: {len(banned_users)}
 
 👑 Admin Commands:
-/approvals - Show pending approvals
-/stats - Show statistics
-/banned - Show banned users
+├─ /approvals - Show pending approvals
+├─ /stats - Show statistics
+└─ /banned - Show banned users
 """
     
     await update.message.reply_text(stats_text)
 
 async def show_pending_approvals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != context.bot_data['admin_id']:
+        await update.message.reply_text("❌ Only the admin can view pending approvals.")
         return
     
     pending_users = db.get_pending_approvals()
     
     if not pending_users:
-        await update.message.reply_text("No pending approvals.")
+        await update.message.reply_text("✅ No pending approvals.")
         return
+    
+    await update.message.reply_text(f"📋 Found {len(pending_users)} pending approval(s):")
     
     for user in pending_users:
         keyboard = [
@@ -112,25 +123,30 @@ async def show_pending_approvals(update: Update, context: ContextTypes.DEFAULT_T
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        text = f"🆕 Pending Approval:\nUser: @{user.username}\nName: {user.full_name}\nID: {user.user_id}"
+        text = (
+            f"🆕 Pending Approval:\n"
+            f"├─ User: @{user.username}\n"
+            f"├─ Name: {user.full_name}\n"
+            f"├─ ID: {user.user_id}\n"
+            f"└─ Submitted: {user.created_at.strftime('%Y-%m-%d %H:%M')}"
+        )
         
         await update.message.reply_text(text, reply_markup=reply_markup)
 
 async def show_banned_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != context.bot_data['admin_id']:
+        await update.message.reply_text("❌ Only the admin can view banned users.")
         return
     
     banned_users = db.get_banned_users()
     
     if not banned_users:
-        await update.message.reply_text("No banned users.")
+        await update.message.reply_text("✅ No banned users.")
         return
     
     text = "🚫 Banned Users:\n\n"
     for user in banned_users:
-        text += f"👤 @{user.username} (ID: {user.user_id})\n"
-        if user.subscription_end:
-            text += f"   Expired: {user.subscription_end.strftime('%Y-%m-%d')}\n"
-        text += "\n"
+        expired_text = f"Expired: {user.subscription_end.strftime('%Y-%m-%d')}" if user.subscription_end else "No subscription data"
+        text += f"👤 @{user.username} (ID: {user.user_id})\n   {expired_text}\n\n"
     
     await update.message.reply_text(text)

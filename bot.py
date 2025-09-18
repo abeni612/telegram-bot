@@ -49,7 +49,10 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logging.error(f"Error: {context.error}")
 
 def main():
+    # Create application with persistence
     application = Application.builder().token(BOT_TOKEN).build()
+    
+    # Store admin and channel IDs in bot data
     application.bot_data['admin_id'] = ADMIN_ID
     application.bot_data['channel_id'] = CHANNEL_ID
     
@@ -66,6 +69,3 @@ def main():
     start_scheduler()
     print("Bot starting...")
     application.run_polling()
-
-if __name__ == "__main__":
-    main()
