@@ -2,7 +2,7 @@ import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
-from config import BOT_TOKEN, ADMIN_ID, CHANNEL_ID, WELCOME_MESSAGE, PHONE_NUMBER
+from config import BOT_TOKEN, ADMIN_ID, CHANNEL_ID, WELCOME_MESSAGE, PHONE_NUMBER, WELCOME_VIDEO_URL
 from database import db
 from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -19,39 +19,42 @@ os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 # Subscription checker
 async def check_subscriptions():
-    users = db.get_all_users()
-    now = datetime.now()
-    
-    for user in users:
-        if user.is_approved and user.subscription_end:
-            # Check if subscription expires in 1 day
-            if user.subscription_end - timedelta(days=1) <= now < user.subscription_end:
-                try:
-                    from telegram import Bot
-                    bot = Bot(token=BOT_TOKEN)
-                    await bot.send_message(
-                        chat_id=user.user_id,
-                        text="⚠️ Your subscription expires in 24 hours! Please renew to maintain access."
-                    )
-                except:
-                    pass
-            
-            # Check if subscription expired
-            elif now >= user.subscription_end:
-                try:
-                    from telegram import Bot
-                    bot = Bot(token=BOT_TOKEN)
-                    # Remove from channel
-                    await bot.ban_chat_member(chat_id=CHANNEL_ID, user_id=user.user_id)
-                    # Update database
-                    db.update_user(user.user_id, {'is_approved': False, 'is_banned': True})
-                    # Notify user
-                    await bot.send_message(
-                        chat_id=user.user_id,
-                        text="❌ Your subscription has expired. You've been removed from the premium channel."
-                    )
-                except:
-                    pass
+    try:
+        from telegram import Bot
+        bot = Bot(token=BOT_TOKEN)
+        users = db.get_all_users()
+        now = datetime.now()
+        
+        for user in users:
+            if user.is_approved and user.subscription_end:
+                # Check if subscription expires in 1 day
+                if user.subscription_end - timedelta(days=1) <= now < user.subscription_end:
+                    try:
+                        await bot.send_message(
+                            chat_id=user.user_id,
+                            text="⚠️ Your subscription expires in 24 hours! Please renew to maintain access."
+                        )
+                        print(f"Sent warning to user {user.user_id}")
+                    except Exception as e:
+                        print(f"Warning failed for user {user.user_id}: {e}")
+                
+                # Check if subscription expired
+                elif now >= user.subscription_end:
+                    try:
+                        # Remove from channel
+                        await bot.ban_chat_member(chat_id=CHANNEL_ID, user_id=user.user_id)
+                        # Update database
+                        db.update_user(user.user_id, {'is_approved': False, 'is_banned': True})
+                        # Notify user
+                        await bot.send_message(
+                            chat_id=user.user_id,
+                            text="❌ Your subscription has expired. You've been removed from the premium channel."
+                        )
+                        print(f"Banned expired user {user.user_id}")
+                    except Exception as e:
+                        print(f"Banning failed for user {user.user_id}: {e}")
+    except Exception as e:
+        print(f"Subscription check error: {e}")
 
 def start_scheduler():
     scheduler = BackgroundScheduler()
@@ -76,6 +79,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'is_approved': False,
             'is_banned': False
         })
+    
+    # Send welcome video
+    try:
+        await update.message.reply_video(
+            video=WELCOME_VIDEO_URL,
+            caption="🎥 Welcome to our premium service! Watch this video to learn more."
+        )
+    except:
+        await update.message.reply_text("🎉 Welcome to our premium service!")
     
     # Send welcome message with phone number
     await update.message.reply_text(WELCOME_MESSAGE.format(PHONE_NUMBER))
@@ -123,18 +135,30 @@ async def handle_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'is_banned': False
         })
     
-    # Notify admin
+    # Send screenshot to admin with approval buttons
+    try:
+        # Send the actual screenshot to admin
+        with open(proof_path, 'rb') as photo:
+            await context.bot.send_photo(
+                chat_id=ADMIN_ID,
+                photo=photo,
+                caption=f"🆕 Payment Submission:\nUser: @{user.username}\nName: {full_name}\nID: {user.user_id}"
+            )
+    except:
+        # Fallback if file doesn't exist
+        admin_text = f"🆕 Payment Submission:\nUser: @{user.username}\nName: {full_name}\nID: {user.user_id}\n📸 Screenshot saved but couldn't send file."
+        await context.bot.send_message(chat_id=ADMIN_ID, text=admin_text)
+    
+    # Send approval buttons
     keyboard = [
         [InlineKeyboardButton("✅ Approve", callback_data=f"approve_{user.id}"),
          InlineKeyboardButton("❌ Reject", callback_data=f"reject_{user.id}")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    admin_text = f"🆕 Payment Submission:\nUser: @{user.username}\nName: {full_name}\nID: {user.id}"
-    
     await context.bot.send_message(
         chat_id=ADMIN_ID,
-        text=admin_text,
+        text="Approve or reject this payment:",
         reply_markup=reply_markup
     )
     
@@ -145,12 +169,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
+    # Check if admin
+    if query.from_user.id != ADMIN_ID:
+        await query.message.reply_text("❌ Only admin can approve/reject users.")
+        return
+    
     action, user_id = query.data.split('_')
     user_id = int(user_id)
     target_user = db.get_user(user_id)
     
-    if action == 'approve' and target_user:
-        # Approve user - 30 days access
+    if not target_user:
+        await query.edit_message_text("❌ User not found.")
+        return
+    
+    if action == 'approve':
+        # Calculate subscription end (30 days from now)
         subscription_end = datetime.now() + timedelta(days=30)
         db.update_user(user_id, {
             'is_approved': True,
@@ -158,26 +191,44 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'subscription_end': subscription_end
         })
         
-        # Add to channel
+        # Add to channel with invite link
         try:
+            # First try to add directly
             await context.bot.add_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
-        except:
-            pass
-        
-        # Notify user
-        try:
+            
+            # Send channel invite link to user
+            chat = await context.bot.get_chat(CHANNEL_ID)
+            invite_link = await chat.export_invite_link()
+            
             await context.bot.send_message(
                 chat_id=user_id,
-                text="🎉 Your payment has been approved! You now have 30 days access to our premium channel."
+                text=f"🎉 Your payment has been approved! You now have 30 days access.\n\n"
+                     f"Join our private channel here: {invite_link}\n\n"
+                     f"Subscription ends: {subscription_end.strftime('%Y-%m-%d %H:%M')}"
             )
+        except Exception as e:
+            print(f"Channel add error: {e}")
+            # Fallback: just notify user
+            await context.bot.send_message(
+                chat_id=user_id,
+                text="🎉 Your payment has been approved! You now have 30 days access.\n\n"
+                     "The admin will add you to the private channel shortly."
+            )
+        
+        await query.edit_message_text(
+            f"✅ User approved!\n"
+            f"Subscription until: {subscription_end.strftime('%Y-%m-%d %H:%M')}\n"
+            f"User: @{target_user.username}"
+        )
+        
+    elif action == 'reject':
+        db.update_user(user_id, {'is_approved': False, 'is_banned': True})
+        
+        # Remove from channel if they were added
+        try:
+            await context.bot.ban_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
         except:
             pass
-        
-        await query.edit_message_text(f"✅ User approved! Subscription until: {subscription_end.strftime('%Y-%m-%d')}")
-        
-    elif action == 'reject' and target_user:
-        # Reject user
-        db.update_user(user_id, {'is_approved': False, 'is_banned': True})
         
         # Notify user
         try:
@@ -188,24 +239,52 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             pass
         
-        await query.edit_message_text("❌ User rejected.")
+        await query.edit_message_text(f"❌ User @{target_user.username} rejected and banned.")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('awaiting_name'):
         await handle_name(update, context)
     else:
-        await update.message.reply_text("Send /start to begin or send a payment screenshot.")
+        # Check if user has active subscription
+        user = update.effective_user
+        db_user = db.get_user(user.id)
+        
+        if db_user and db_user.is_subscription_active():
+            # User is approved and active
+            remaining = db_user.subscription_end - datetime.now()
+            days_left = remaining.days
+            await update.message.reply_text(
+                f"✅ Your subscription is active!\n"
+                f"Days remaining: {days_left}\n"
+                f"Expires: {db_user.subscription_end.strftime('%Y-%m-%d %H:%M')}"
+            )
+        else:
+            await update.message.reply_text("Send /start to begin or send a payment screenshot.")
 
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
     
     users = db.get_all_users()
-    active = [u for u in users if u.is_subscription_active()]
-    pending = len([u for u in users if not u.is_approved and not u.is_banned])
+    active_users = [u for u in users if u.is_subscription_active()]
+    pending_approvals = [u for u in users if not u.is_approved and not u.is_banned]
+    banned_users = [u for u in users if u.is_banned]
     
-    stats = f"📊 Stats:\nTotal: {len(users)}\nActive: {len(active)}\nPending: {pending}"
-    await update.message.reply_text(stats)
+    stats_text = f"""
+📊 ADMIN STATISTICS:
+
+👥 Total Users: {len(users)}
+✅ Active Subscriptions: {len(active_users)}
+⏳ Pending Approvals: {len(pending_approvals)}
+🚫 Banned Users: {len(banned_users)}
+
+Active Users:
+"""
+    for user in active_users:
+        remaining = user.subscription_end - datetime.now()
+        stats_text += f"• @{user.username} - {remaining.days} days left\n"
+    
+    await update.message.reply_text(stats_text)
 
 def main():
     application = Application.builder().token(BOT_TOKEN).build()
@@ -220,7 +299,11 @@ def main():
     # Start scheduler
     start_scheduler()
     
-    print("Bot is running...")
+    print("🤖 Bot is running perfectly...")
+    print(f"👑 Admin ID: {ADMIN_ID}")
+    print(f"📢 Channel ID: {CHANNEL_ID}")
+    print("⏰ Subscription checker active (runs every hour)")
+    
     application.run_polling()
 
 if __name__ == "__main__":

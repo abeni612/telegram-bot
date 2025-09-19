@@ -21,3 +21,4 @@ WELCOME_MESSAGE = """
 """
 
 PHONE_NUMBER = "+1234567890"  # Your phone number here
+WELCOME_VIDEO_URL = "https://youtu.be/nF0rqeymxmQ?si=pNNlXP-lMxW3d8xl"  # Replace with your actual YouTube video URL
