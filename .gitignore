@@ -1,26 +1,5 @@
-# Environment variables
 .env
-
-# Database
 *.db
-*.sqlite
-*.db-journal
-
-# Uploads folder
 uploads/
-
-# Python cache
 __pycache__/
 *.pyc
-
-# Logs
-logs/
-*.log
-
-# IDE files
-.vscode/
-.idea/
-
-# OS files
-.DS_Store
-Thumbs.db
