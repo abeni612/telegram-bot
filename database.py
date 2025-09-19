@@ -11,16 +11,20 @@ class User(Base):
     
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, unique=True)
-    username = Column(String)
-    full_name = Column(String)
+    username = Column(String, default='')
+    full_name = Column(String, default='')
     subscription_end = Column(DateTime)
     is_approved = Column(Boolean, default=False)
     is_banned = Column(Boolean, default=False)
-    payment_proof_path = Column(String)
+    payment_proof_path = Column(String, default='')
     created_at = Column(DateTime, default=datetime.now)
     
     def is_subscription_active(self):
-        return self.is_approved and not self.is_banned and self.subscription_end and self.subscription_end > datetime.now()
+        if not self.is_approved or self.is_banned:
+            return False
+        if not self.subscription_end:
+            return False
+        return self.subscription_end > datetime.now()
 
 class Database:
     def __init__(self):
@@ -30,29 +34,44 @@ class Database:
         self.session = Session()
     
     def add_user(self, user_data):
-        user = User(**user_data)
-        self.session.add(user)
-        self.session.commit()
-        return user
+        try:
+            user = User(**user_data)
+            self.session.add(user)
+            self.session.commit()
+            return user
+        except:
+            self.session.rollback()
+            return None
     
     def get_user(self, user_id):
-        return self.session.query(User).filter_by(user_id=user_id).first()
+        try:
+            return self.session.query(User).filter_by(user_id=user_id).first()
+        except:
+            return None
     
     def update_user(self, user_id, update_data):
-        user = self.get_user(user_id)
-        if user:
-            for key, value in update_data.items():
-                setattr(user, key, value)
-            self.session.commit()
-        return user
+        try:
+            user = self.get_user(user_id)
+            if user:
+                for key, value in update_data.items():
+                    setattr(user, key, value)
+                self.session.commit()
+                return user
+            return None
+        except:
+            self.session.rollback()
+            return None
     
     def get_all_users(self):
-        return self.session.query(User).all()
+        try:
+            return self.session.query(User).all()
+        except:
+            return []
     
     def get_pending_approvals(self):
-        return self.session.query(User).filter_by(is_approved=False).all()
-    
-    def get_banned_users(self):
-        return self.session.query(User).filter_by(is_banned=True).all()
+        try:
+            return self.session.query(User).filter_by(is_approved=False).all()
+        except:
+            return []
 
 db = Database()

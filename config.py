@@ -3,9 +3,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_ID = int(os.getenv('ADMIN_ID'))
-CHANNEL_ID = os.getenv('CHANNEL_ID')
+# Safe environment variable handling
+BOT_TOKEN = os.getenv('BOT_TOKEN', '').strip()
+ADMIN_ID = os.getenv('ADMIN_ID', '').strip()
+CHANNEL_ID = os.getenv('CHANNEL_ID', '').strip()
+
+# Convert ADMIN_ID to integer safely
+try:
+    ADMIN_ID = int(ADMIN_ID) if ADMIN_ID else 0
+except (ValueError, TypeError):
+    ADMIN_ID = 0
+
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///bot_database.db')
 
 WELCOME_MESSAGE = """
@@ -21,4 +29,4 @@ WELCOME_MESSAGE = """
 """
 
 PHONE_NUMBER = "+1234567890"  # Your phone number here
-WELCOME_VIDEO_URL = "https://youtu.be/nF0rqeymxmQ?si=pNNlXP-lMxW3d8xl"  # Replace with your actual YouTube video URL
+WELCOME_VIDEO_URL = "https://www.youtube.com/watch?v=nF0rqeymxmQ&pp=ugUEEgJlbg%3D%3D"  # Your YouTube video URL
